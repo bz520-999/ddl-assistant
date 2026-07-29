@@ -602,6 +602,96 @@ with tab6:
             is_today = (date_str == today_str)
             border_color = "#e74c3c" if len(tasks) >= 3 else "#f39c12" if len(tasks) >= 1 else "#2ecc71"
             cell_class = "cal-cell today-highlight" if is_today else "cal-cell"
+            html_calwith tab6:
+    st.subheader("📆 当月 DDL 日历")
+    st.caption("🔴红色(≥3项)  🟠橙色(1-2项)  🟢绿色(无任务)  | 点击箭头切换月份")
+
+    if "cal_year" not in st.session_state:
+        st.session_state.cal_year = datetime.now().year
+    if "cal_month" not in st.session_state:
+        st.session_state.cal_month = datetime.now().month
+
+    nav_col1, nav_col2, nav_col3 = st.columns([1, 2, 1])
+    with nav_col1:
+        if st.button("◀ 上月", use_container_width=True):
+            if st.session_state.cal_month == 1:
+                st.session_state.cal_month = 12
+                st.session_state.cal_year -= 1
+            else:
+                st.session_state.cal_month -= 1
+            st.rerun()
+    with nav_col2:
+        st.markdown(f"<h3 style='text-align: center;'>{st.session_state.cal_year} 年 {st.session_state.cal_month} 月</h3>", unsafe_allow_html=True)
+    with nav_col3:
+        if st.button("下月 ▶", use_container_width=True):
+            if st.session_state.cal_month == 12:
+                st.session_state.cal_month = 1
+                st.session_state.cal_year += 1
+            else:
+                st.session_state.cal_month += 1
+            st.rerun()
+
+    year = st.session_state.cal_year
+    month = st.session_state.cal_month
+    first_day = datetime(year, month, 1)
+    if month == 12:
+        last_day = datetime(year + 1, 1, 1) - timedelta(days=1)
+    else:
+        last_day = datetime(year, month + 1, 1) - timedelta(days=1)
+    start_weekday = first_day.weekday()
+    total_days = last_day.day
+
+    df_cal = st.session_state.df[st.session_state.df["状态"] != "已完成"].copy()
+    tasks_by_date = {}
+    if not df_cal.empty:
+        try:
+            df_cal["截止日期_dt"] = pd.to_datetime(df_cal["截止日期"])
+            month_mask = (df_cal["截止日期_dt"].dt.year == year) & (df_cal["截止日期_dt"].dt.month == month)
+            for _, row in df_cal[month_mask].iterrows():
+                key = row["截止日期_dt"].strftime("%Y-%m-%d")
+                if key not in tasks_by_date:
+                    tasks_by_date[key] = []
+                tasks_by_date[key].append(row["课程/科目"])
+        except:
+            pass
+
+    cal_dates = [None] * start_weekday
+    for d in range(1, total_days + 1):
+        cal_dates.append(datetime(year, month, d))
+    while len(cal_dates) < 42:
+        cal_dates.append(None)
+
+    html_cal = """
+    <style>
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin-top: 10px; }
+    .cal-cell { min-height: 75px; background: #f9f9f9; border-radius: 8px; padding: 4px 2px; border-top: 3px solid #ddd; overflow: hidden; font-size: 12px; }
+    .cal-cell .date { font-weight: bold; font-size: 14px; padding-left: 4px; color: #333; }
+    .cal-cell .task-item { font-size: 10px; background: rgba(255,75,75,0.1); border-radius: 4px; padding: 1px 4px; margin: 2px 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #333; }
+    .cal-weekday { text-align: center; font-weight: bold; color: #888; font-size: 13px; padding: 6px 0; }
+    .cal-empty { min-height: 75px; background: transparent; }
+    .today-highlight { background: #ffeb3b30 !important; border: 1px solid #ffc107; }
+    @media (max-width: 600px) { .cal-cell { min-height: 60px; font-size: 10px; } .cal-cell .date { font-size: 12px; } .cal-cell .task-item { font-size: 9px; } }
+    </style>
+    <div class="cal-grid">
+    """
+    weekdays = ["一", "二", "三", "四", "五", "六", "日"]
+    for w in weekdays:
+        html_cal += f'<div class="cal-weekday">{w}</div>'
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    for dt in cal_dates:
+        if dt is None:
+            html_cal += '<div class="cal-empty"></div>'
+        else:
+            date_str = dt.strftime("%Y-%m-%d")
+            tasks = tasks_by_date.get(date_str, [])
+            is_today = (date_str == today_str)
+            if len(tasks) >= 3:
+                border_color = "#e74c3c"
+            elif len(tasks) >= 1:
+                border_color = "#f39c12"
+            else:
+                border_color = "#2ecc71"
+            cell_class = "cal-cell today-highlight" if is_today else "cal-cell"
             html_cal += f'<div class="{cell_class}" style="border-top-color: {border_color};"><div class="date">{dt.day}</div>'
             for task in tasks[:4]:
                 task_display = task[:6] + "…" if len(task) > 6 else task
@@ -617,6 +707,6 @@ with tab6:
         st.info(f"📊 本月共有 **{total_tasks_month}** 项未完成任务，分布在 **{len(tasks_by_date)}** 天里。")
     else:
         st.success("🎉 本月没有未完成的任务，继续保持！")
-# ---------- 8. 底部 ----------
+
 st.divider()
 st.caption("💡 Pro 终极版：AI解析 | 红绿灯预警 | 月视图 | 图片OCR | 数据备份 | 暗黑主题")
