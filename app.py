@@ -70,6 +70,111 @@ def save_data():
 
 st.title("🚀 智能学习DDL管理 Pro")
 
+if not st.session_state.df.empty:
+    try:
+        df_urgent = st.session_state.df[st.session_state.df["状态"] != "已完成"].copy()
+        if not df_urgent.empty:
+            df_urgent["截止日期_dt"] = pd.to_datetime(df_urgent["截止日期"], errors='coerce')
+            df_urgent = df_urgent.dropna(subset=["截止日期_dt"])
+            if not df_urgent.empty:
+                nearest = df_urgent["截止日期_dt"].min()
+                diff = (nearest - datetime.now()).total_seconds()
+                if diff > 0:
+                    days = int(diff // 86400)
+                    hours = int((diff % 86400) // 3600)
+                    color = "green" if days > 3 else "orange" if days > 1 else "red"
+                    st.markdown(f"<h2 style='text-align: center; color: {color};'>⏳ 距离最近DDL: {days} 天 {hours} 小时</h2>", unsafe_allow_html=True)
+                else:
+                    st.markdown("<h2 style='text-align: center; color: red;'>🚨 有DDL已逾期！立刻处理！</h2>", unsafe_allow_html=True)
+    except:
+        pass
+
+if not st.session_state.df.empty:
+    try:
+        df_alert = st.session_state.df[st.session_state.df["状态"] != "已完成"].copy()
+        if not df_alert.empty:
+            df_alert["截止日期"] = pd.to_datetime(df_alert["截止日期"], errors='coerce')
+            df_alert = df_alert.dropna(subset=["截止日期"])
+            if not df_alert.empty:
+                today = datetime.now().date()
+                alert_df = df_alert[(df_alert["截止日期"].dt.date == today) |
+                                    (df_alert["截止日期"].dt.date == today + timedelta(days=1))]
+                for _, row in alert_df.iterrows():
+                    delta = (row["截止日期"].date() - today).days
+                    msg = "⏰ 今天截止" if delta == 0 else "⏰ 明天截止"
+                    st.toast(f"{msg}: {row['课程/科目']}", icon="🔔")
+    except:
+        pass
+
+with st.sidebar:
+    st.header("⚙️ 配置")
+    api_key = st.text_input("DeepSeek API Key", type="password", help="platform.deepseek.com 获取")
+    st.divider()
+    st.subheader("🎨 界面主题")
+    theme = st.radio("主题", ["明亮", "暗黑"], index=0, horizontal=True)
+    if theme == "暗黑":
+        st.markdown("""
+        <style>
+        .stApp { background-color: #1e1e1e; color: #ffffff; }
+        .stApp * { color: #e0e0e0; }
+        .stButton button { background-color: #333333; color: white; border: 1px solid #555; }
+        .stDataFrame { background-color: #2a2a2a; }
+        </style>
+        """, unsafe_allow_html=True)
+
+    st.divider()
+    st.subheader("📊 学习负荷")
+    df = st.session_state.df
+    total = len(df)
+    if total > 0:
+        done = len(df[df["状态"] == "已完成"])
+        rate = int(done / total * 100) if total > 0 else 0
+        st.metric("总任务数", total, delta=f"已完成 {done} 项")
+        st.progress(rate / 100, text=f"完成进度 {rate}%")
+        try:
+            df_temp = df[df["状态"] != "已完成"].copy()
+            if not df_temp.empty:
+                df_temp["截止日期"] = pd.to_datetime(df_temp["截止日期"], errors='coerce')
+                df_temp = df_temp.dropna(subset=["截止日期"])
+                if not df_temp.empty:
+                    urgent = df_temp[(df_temp["截止日期"] >= datetime.now()) &
+                                     (df_temp["截止日期"] <= datetime.now() + timedelta(days=3))]
+          try:
+        dt = datetime.strptime(date_str, "%Y/%m/%d")
+        return dt.strftime("%Y-%m-%d")
+    except:
+        pass
+    try:
+        dt = datetime.strptime(date_str, "%m/%d")
+        return dt.replace(year=datetime.now().year).strftime("%Y-%m-%d")
+    except:
+        pass
+    if date_parser:
+        try:
+            dt = date_parser.parse(date_str, fuzzy=True)
+            return dt.strftime("%Y-%m-%d")
+        except:
+            pass
+    return None
+
+DATA_FILE = "deadlines.csv"
+
+if "df" not in st.session_state:
+    if os.path.exists(DATA_FILE):
+        st.session_state.df = pd.read_csv(DATA_FILE)
+        for col in ["重复", "状态"]:
+            if col not in st.session_state.df.columns:
+                st.session_state.df[col] = "无" if col == "重复" else "未完成"
+    else:
+        st.session_state.df = pd.DataFrame(columns=[
+            "课程/科目", "截止日期", "描述", "标签", "重复", "状态", "添加时间"
+        ])
+
+def save_data():
+    st.session_state.df.to_csv(DATA_FILE, index=False, encoding="utf-8-sig")
+
+st.title("🚀 智能学习DDL管理 Pro")
+
 # 倒计时横幅
 if not st.session_state.df.empty:
     try:
