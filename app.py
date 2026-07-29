@@ -181,8 +181,53 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📅 导出与分享", "📂 文件上传", "📆 月视图"
 ])
 
- # 使用Form实现提交后自动清空
-    with st.form(key="add_form", clear_on_submit=True):
+# ----- 7.1 添加与解析 (Form实现自动清空) -----
+with tab1:
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        st.subheader("✍️ 一句话添加DDL")
+        user_input = st.text_area("输入你的DDL", height=80)
+
+        if st.button("🤖 AI 智能解析", use_container_width=True):
+            if not api_key:
+                st.error("❌ 请先在左侧输入API Key！")
+            elif not user_input.strip():
+                st.warning("⚠️ 请先输入内容")
+            else:
+                with st.spinner("AI解析中..."):
+                    try:
+                        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                        prompt = f"""
+                        提取学习任务信息。
+                        规则：1.提取课程名称 2.提取截止日期(转为YYYY-MM-DD) 3.提取描述。
+                        只返回JSON: {{"course": "", "deadline": "", "notes": ""}}
+                        文本：{user_input}
+                        """
+                        payload = {
+                            "model": "deepseek-chat",
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.1
+                        }
+                        response = requests.post("https://api.deepseek.com/v1/chat/completions", 
+                                                headers=headers, json=payload, timeout=30)
+                        if response.status_code == 200:
+                            result = response.json()
+                            content = result["choices"][0]["message"]["content"].replace("```json", "").replace("```", "").strip()
+                            parsed = json.loads(content)
+                            st.session_state["parsed_course"] = parsed.get("course", "")
+                            st.session_state["parsed_deadline"] = parsed.get("deadline", "")
+                            st.session_state["parsed_notes"] = parsed.get("notes", "")
+                            st.success("✅ 解析成功！请填写信息后保存")
+                        else:
+                            st.error(f"API失败：{response.text}")
+                    except Exception as e:
+                        st.error(f"解析出错：{e}")
+
+        st.divider()
+        st.subheader("🖊️ 手动录入")
+        
+        # 使用Form实现提交后自动清空
+        with st.form(key="add_form", clear_on_submit=True):
             f_col1, f_col2 = st.columns(2)
             with f_col1:
                 course = st.text_input("课程/科目", value=st.session_state.get("parsed_course", ""))
@@ -233,16 +278,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
                             "添加时间": datetime.now().strftime("%Y-%m-%d %H:%M")
                         })
                     
-                    st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame(new_rows)], ignore_index=True)
-                    save_data()
-                    for key in ["parsed_course", "parsed_deadline", "parsed_notes"]:
-                        if key in st.session_state: del st.session_state[key]
-                    st.success(f"✅ 成功添加 {len(new_rows)} 条任务！", icon="🎉")
-                    st.rerun()
-
-    with col2:
-        st.subheader("📌 示例")
-        st.info("下周一交高数作业\n7月30日大创报告")
+                  
     # ----- 7.2 管理与搜索 (含批量删除) -----
 with tab2:
     st.subheader("🔍 筛选与任务管理")
