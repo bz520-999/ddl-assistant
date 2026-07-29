@@ -182,7 +182,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
 ])
 
  # 使用Form实现提交后自动清空
-        with st.form(key="add_form", clear_on_submit=True):
+    with st.form(key="add_form", clear_on_submit=True):
             f_col1, f_col2 = st.columns(2)
             with f_col1:
                 course = st.text_input("课程/科目", value=st.session_state.get("parsed_course", ""))
