@@ -302,11 +302,17 @@ with tab2:
         df_display = df_display[df_display["状态"] == filter_status]
 
     if not df_display.empty:
-        # 计算剩余天数（红绿灯）
-        df_display["截止日期_dt"] = pd.to_datetime(df_display["截止日期"])
+    # 强制转换日期，无效值变成 NaT
+    df_display["截止日期_dt"] = pd.to_datetime(df_display["截止日期"], errors='coerce')
+    # 删除日期无效的行（比如空值或乱码）
+    df_display = df_display.dropna(subset=["截止日期_dt"]).copy()
+    if not df_display.empty:
         today = datetime.now().date()
+        # 计算剩余天数（先提取日期部分再相减）
         df_display["剩余天数"] = (df_display["截止日期_dt"].dt.date - today).dt.days
-        
+    else:
+        st.info("当前任务中没有有效日期，请检查数据格式")
+        st.stop()
         def get_icon(row):
             if row["状态"] == "已完成": return "✅ 已完成"
             days = row["剩余天数"]
