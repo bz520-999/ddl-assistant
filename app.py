@@ -6,9 +6,8 @@ import os
 from datetime import datetime, timedelta
 import base64
 import plotly.express as px
-import hashlib
 
-# 文件处理依赖
+# ========== 依赖库（带容错） ==========
 try:
     from pypdf import PdfReader
 except ImportError:
@@ -35,14 +34,14 @@ try:
 except ImportError:
     date_parser = None
 
-# ---------- 页面配置 ----------
+# ========== 页面配置 ==========
 st.set_page_config(
     page_title="学习助手 Pro",
     layout="centered",
     initial_sidebar_state="collapsed"
 )
 
-# 自定义CSS（手机优化）
+# 手机适配CSS
 st.markdown("""
 <style>
     .stApp { max-width: 100%; padding: 0.5rem; }
@@ -51,16 +50,19 @@ st.markdown("""
     @media (max-width: 600px) {
         .row-widget.stColumns { flex-direction: column !important; }
     }
+    .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+    .cal-cell { min-height: 60px; background: #f9f9f9; border-radius: 4px; padding: 2px; border-top: 3px solid #ddd; overflow: hidden; font-size: 11px; }
+    .cal-cell .date { font-weight: bold; font-size: 13px; }
+    .cal-weekday { text-align: center; font-weight: bold; color: #888; font-size: 13px; padding: 4px 0; }
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- 数据文件 ----------
+# ========== 数据文件 ==========
 DDL_FILE = "deadlines.csv"
 LIBRARY_FILE = "library.csv"
 CATEGORIES_FILE = "categories.csv"
 
-# ---------- 数据初始化 ----------
-# DDL
+# ---------- 初始化DDL ----------
 if "df" not in st.session_state:
     if os.path.exists(DDL_FILE):
         st.session_state.df = pd.read_csv(DDL_FILE)
@@ -72,7 +74,7 @@ if "df" not in st.session_state:
             "课程/科目", "截止日期", "描述", "标签", "重复", "状态", "添加时间"
         ])
 
-# 资料库
+# ---------- 初始化资料库 ----------
 if "library" not in st.session_state:
     if os.path.exists(LIBRARY_FILE):
         st.session_state.library = pd.read_csv(LIBRARY_FILE)
@@ -81,13 +83,14 @@ if "library" not in st.session_state:
             "文件名", "分类", "摘要", "上传时间", "内容"
         ])
 
-# 分类
+# ---------- 初始化分类 ----------
 if "categories" not in st.session_state:
     if os.path.exists(CATEGORIES_FILE):
         st.session_state.categories = pd.read_csv(CATEGORIES_FILE)["分类"].tolist()
     else:
-        st.session_state.categories = ["未分类"]  # 默认分类
+        st.session_state.categories = ["未分类"]
 
+# ========== 保存函数 ==========
 def save_ddl():
     st.session_state.df.to_csv(DDL_FILE, index=False, encoding="utf-8-sig")
 
@@ -97,7 +100,7 @@ def save_library():
 def save_categories():
     pd.DataFrame({"分类": st.session_state.categories}).to_csv(CATEGORIES_FILE, index=False)
 
-# ---------- 辅助函数 ----------
+# ========== 辅助函数 ==========
 def parse_flexible_date(date_str):
     if not date_str:
         return None
@@ -127,14 +130,14 @@ def extract_text_from_file(uploaded_file):
                 text += page.extract_text()
         else:
             st.error("请安装 pypdf")
-    elif file_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document" or file_type == "application/msword":
+    elif "word" in file_type or "document" in file_type:
         if Document:
             doc = Document(uploaded_file)
             for para in doc.paragraphs:
                 text += para.text + "\n"
         else:
             st.error("请安装 python-docx")
-    elif file_type == "application/vnd.openxmlformats-officedocument.presentationml.presentation" or file_type == "application/vnd.ms-powerpoint":
+    elif "presentation" in file_type or "powerpoint" in file_type:
         if Presentation:
             prs = Presentation(uploaded_file)
             for slide in prs.slides:
@@ -157,7 +160,7 @@ def extract_text_from_file(uploaded_file):
             st.error("请安装 easyocr 和 opencv-python-headless")
         except Exception as e:
             st.error(f"OCR失败：{e}")
-    else:  # txt 或其他文本格式
+    else:  # txt 等
         try:
             text = uploaded_file.read().decode("utf-8")
         except:
@@ -165,13 +168,13 @@ def extract_text_from_file(uploaded_file):
                 uploaded_file.seek(0)
                 text = uploaded_file.read().decode("gbk", errors="ignore")
             except:
-                st.error("无法解码文件，请确保是文本文件")
+                st.error("无法解码文件")
     return text
 
-# ---------- 标题 ----------
+# ========== 标题 ==========
 st.title("🎓 学习助手 Pro")
 
-# ---------- 侧边栏 ----------
+# ========== 侧边栏 ==========
 with st.sidebar:
     st.header("⚙️ 设置")
     api_key = st.text_input("DeepSeek API Key", type="password", help="platform.deepseek.com 获取")
@@ -197,10 +200,10 @@ with st.sidebar:
             """, unsafe_allow_html=True)
     st.divider()
     st.subheader("💾 数据备份")
-    json_str = st.session_state.df.to_json(orient="records", force_ascii=False)
-    st.download_button("📥 备份DDL", data=json_str, file_name="backup_ddl.json")
-    lib_json = st.session_state.library.to_json(orient="records", force_ascii=False)
-    st.download_button("📥 备份资料库", data=lib_json, file_name="backup_library.json")
+    json_ddl = st.session_state.df.to_json(orient="records", force_ascii=False)
+    st.download_button("📥 备份DDL", data=json_ddl, file_name="backup_ddl.json")
+    json_lib = st.session_state.library.to_json(orient="records", force_ascii=False)
+    st.download_button("📥 备份资料库", data=json_lib, file_name="backup_library.json")
     uploaded_backup = st.file_uploader("恢复DDL备份", type=["json"], key="restore_ddl")
     if uploaded_backup:
         import json as json_lib
@@ -214,24 +217,88 @@ with st.sidebar:
         except Exception as e:
             st.error(f"恢复失败：{e}")
 
-# ---------- 主界面标签 ----------
-tab_ddl, tab_lib = st.tabs(["📝 DDL管理", "📚 资料库"])
+# ========== 智能输入区（统一） ==========
+st.markdown("### ✨ 智能输入")
+with st.container():
+    input_col, btn_col = st.columns([5, 1])
+    with input_col:
+        smart_input = st.text_area("输入DDL或上传文件", placeholder="例如：下周一交高数作业，或上传课件", height=80, key="smart_input")
+    with btn_col:
+        st.write("")
+        st.write("")
+        send_btn = st.button("🚀 发送", use_container_width=True)
 
-# ==================== DDL 管理 ====================
+    uploaded_file = st.file_uploader("或点击上传文件 (PDF/Word/PPT/图片/TXT)", type=None, key="smart_file", label_visibility="collapsed")
+
+    if send_btn:
+        if uploaded_file is not None:
+            # 处理文件上传
+            content = extract_text_from_file(uploaded_file)
+            if content:
+                st.session_state["uploaded_content"] = content
+                st.session_state["uploaded_filename"] = uploaded_file.name
+                st.success(f"文件 '{uploaded_file.name}' 已读取，请到资料库选择分类保存")
+            else:
+                st.warning("文件内容提取失败")
+        elif smart_input.strip():
+            # 文字输入，尝试AI解析为DDL
+            if not api_key:
+                st.error("请先在侧边栏设置 API Key")
+            else:
+                with st.spinner("AI解析中..."):
+                    try:
+                        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                        prompt = f"""提取学习任务信息。规则：
+1. 如果是DDL，提取课程名称、截止日期(转为YYYY-MM-DD)、描述。
+2. 如果不是DDL，请返回 {{"type": "other", "content": "原文"}}。
+只返回JSON。
+文本：{smart_input}"""
+                        payload = {
+                            "model": "deepseek-chat",
+                            "messages": [{"role": "user", "content": prompt}],
+                            "temperature": 0.1
+                        }
+                        response = requests.post("https://api.deepseek.com/v1/chat/completions",
+                                                headers=headers, json=payload, timeout=30)
+                        if response.status_code == 200:
+                            content = response.json()["choices"][0]["message"]["content"]
+                            content = content.replace("```json", "").replace("```", "").strip()
+                            parsed = json.loads(content)
+                            if parsed.get("course") and parsed.get("deadline"):
+                                st.session_state["parsed_course"] = parsed.get("course", "")
+                                st.session_state["parsed_deadline"] = parsed.get("deadline", "")
+                                st.session_state["parsed_notes"] = parsed.get("notes", "")
+                                st.success("✅ 识别为DDL，已自动填入下方表单")
+                            else:
+                                st.info("识别为普通文本，已复制到剪贴板（可手动添加到资料库）")
+                                st.session_state["smart_text"] = parsed.get("content", smart_input)
+                        else:
+                            st.error("AI解析失败")
+                    except Exception as e:
+                        st.error(f"出错：{e}")
+        else:
+            st.warning("请输入内容或上传文件")
+
+st.divider()
+
+# ========== 主标签 ==========
+tab_ddl, tab_lib = st.tabs(["📝 DDL管理（全功能）", "📚 资料库"])
+
+# ==================== TAB1: DDL管理（完整功能） ====================
 with tab_ddl:
-    st.subheader("📝 添加/管理DDL")
-    # 智能输入（简版，可扩展）
+    # ----- 手动添加（自动填充AI解析结果） -----
+    st.subheader("➕ 添加DDL")
     with st.form("ddl_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
-            course = st.text_input("课程/科目")
-            deadline_raw = st.text_input("截止日期 (支持多种格式)")
+            course = st.text_input("课程/科目", value=st.session_state.get("parsed_course", ""))
+            deadline_raw = st.text_input("截止日期 (支持多种格式)", value=st.session_state.get("parsed_deadline", ""))
         with col2:
-            notes = st.text_input("描述")
+            notes = st.text_input("描述", value=st.session_state.get("parsed_notes", ""))
             tag = st.text_input("标签", placeholder="作业/考试")
             repeat = st.selectbox("重复", ["无", "每周", "每月"])
-        submitted_ddl = st.form_submit_button("💾 保存DDL")
-        if submitted_ddl:
+        submitted = st.form_submit_button("💾 保存DDL")
+        if submitted:
             deadline = parse_flexible_date(deadline_raw)
             if not course or not deadline:
                 st.error("课程和截止日期必填")
@@ -268,11 +335,14 @@ with tab_ddl:
                     })
                 st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame(new_rows)], ignore_index=True)
                 save_ddl()
+                # 清空AI暂存
+                for key in ["parsed_course", "parsed_deadline", "parsed_notes"]:
+                    if key in st.session_state: del st.session_state[key]
                 st.success(f"添加了 {len(new_rows)} 条DDL")
                 st.rerun()
 
-    # 显示DDL列表
-    st.subheader("📋 当前DDL")
+    # ----- 管理与搜索 -----
+    st.subheader("🔍 管理与搜索")
     search = st.text_input("搜索DDL", key="ddl_search")
     filter_status = st.selectbox("状态筛选", ["全部", "未完成", "已完成"], key="ddl_status")
     df_display = st.session_state.df.copy()
@@ -280,7 +350,9 @@ with tab_ddl:
         df_display = df_display[df_display["课程/科目"].str.contains(search, na=False) | df_display["描述"].str.contains(search, na=False)]
     if filter_status != "全部":
         df_display = df_display[df_display["状态"] == filter_status]
+
     if not df_display.empty:
+        # 状态切换
         edited = st.data_editor(
             df_display[["课程/科目", "截止日期", "描述", "标签", "状态"]],
             column_config={
@@ -297,6 +369,7 @@ with tab_ddl:
             save_ddl()
             st.success("状态已更新")
             st.rerun()
+
         # 批量删除
         st.divider()
         st.subheader("🗑️ 批量操作")
@@ -330,59 +403,213 @@ with tab_ddl:
     else:
         st.info("没有匹配的DDL")
 
-    # 导出DDL
-    st.subheader("📤 导出")
-    if st.button("导出CSV"):
-        csv = st.session_state.df.to_csv(index=False)
-        b64 = base64.b64encode(csv.encode()).decode()
-        st.markdown(f'<a href="data:file/csv;base64,{b64}" download="deadlines.csv">下载CSV</a>', unsafe_allow_html=True)
+    # ----- 图表分析 -----
+    st.subheader("📊 数据分析")
+    df_chart = st.session_state.df[st.session_state.df["状态"] != "已完成"].copy()
+    if df_chart.empty:
+        st.info("没有未完成的任务")
+    else:
+        try:
+            df_chart["截止日期"] = pd.to_datetime(df_chart["截止日期"], errors='coerce')
+            df_chart = df_chart.dropna(subset=["截止日期"])
+            today = datetime.now()
+            future_30 = today + timedelta(days=30)
+            df_chart = df_chart[(df_chart["截止日期"] >= today) & (df_chart["截止日期"] <= future_30)]
+            if not df_chart.empty:
+                day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                day_names_cn = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+                df_chart["星期"] = pd.Categorical(df_chart["截止日期"].dt.day_name(), categories=day_order)
+                count_df = df_chart.groupby("星期").size().reset_index(name="任务数量")
+                count_df["星期"] = count_df["星期"].map(dict(zip(day_order, day_names_cn)))
+                fig = px.bar(count_df, x="星期", y="任务数量", title="未来30天 DDL 分布",
+                             color="任务数量", color_continuous_scale="Reds", text="任务数量")
+                fig.update_layout(height=350)
+                st.plotly_chart(fig, use_container_width=True)
 
-# ==================== 资料库管理 ====================
+                st.subheader("🏷️ 标签分布")
+                tag_df = df_chart["标签"].value_counts().reset_index()
+                tag_df.columns = ["标签", "数量"]
+                fig_pie = px.pie(tag_df, values="数量", names="标签", hole=0.3)
+                st.plotly_chart(fig_pie, use_container_width=True)
+            else:
+                st.info("未来30天无任务")
+        except Exception as e:
+            st.warning(f"图表生成失败：{e}")
+
+    # ----- 月视图 -----
+    st.subheader("📆 月视图")
+    if "cal_year" not in st.session_state:
+        st.session_state.cal_year = datetime.now().year
+        st.session_state.cal_month = datetime.now().month
+    c1, c2, c3 = st.columns([1,2,1])
+    with c1:
+        if st.button("◀"):
+            if st.session_state.cal_month == 1:
+                st.session_state.cal_month = 12
+                st.session_state.cal_year -= 1
+            else:
+                st.session_state.cal_month -= 1
+            st.rerun()
+    with c2:
+        st.write(f"### {st.session_state.cal_year}年{st.session_state.cal_month}月")
+    with c3:
+        if st.button("▶"):
+            if st.session_state.cal_month == 12:
+                st.session_state.cal_month = 1
+                st.session_state.cal_year += 1
+            else:
+                st.session_state.cal_month += 1
+            st.rerun()
+    year = st.session_state.cal_year
+    month = st.session_state.cal_month
+    first = datetime(year, month, 1)
+    if month == 12:
+        last = datetime(year+1, 1, 1) - timedelta(days=1)
+    else:
+        last = datetime(year, month+1, 1) - timedelta(days=1)
+    start_week = first.weekday()
+    total_days = last.day
+    df_cal = st.session_state.df[st.session_state.df["状态"] != "已完成"].copy()
+    tasks = {}
+    if not df_cal.empty:
+        df_cal["截止日期"] = pd.to_datetime(df_cal["截止日期"], errors='coerce')
+        df_cal = df_cal.dropna(subset=["截止日期"])
+        for _, row in df_cal.iterrows():
+            if row["截止日期"].year == year and row["截止日期"].month == month:
+                key = row["截止日期"].strftime("%Y-%m-%d")
+                tasks.setdefault(key, []).append(row["课程/科目"])
+    cal_dates = [None]*start_week + [datetime(year, month, d) for d in range(1, total_days+1)]
+    while len(cal_dates) < 42:
+        cal_dates.append(None)
+    html = "<div class='cal-grid'>"
+    for w in ["一","二","三","四","五","六","日"]:
+        html += f"<div class='cal-weekday'>{w}</div>"
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    for d in cal_dates:
+        if d is None:
+            html += "<div class='cal-cell' style='background:transparent;'></div>"
+        else:
+            key = d.strftime("%Y-%m-%d")
+            t = tasks.get(key, [])
+            color = "#e74c3c" if len(t)>=3 else "#f39c12" if len(t)>=1 else "#2ecc71"
+            bg = "#fff3cd" if key == today_str else "#f9f9f9"
+            html += f"<div class='cal-cell' style='border-top-color:{color};background:{bg};'>"
+            html += f"<div class='date'>{d.day}</div>"
+            for task in t[:2]:
+                html += f"<div style='font-size:9px;'>{task[:4]}</div>"
+            if len(t)>2:
+                html += f"<div style='font-size:9px;color:#888;'>+{len(t)-2}</div>"
+            html += "</div>"
+    html += "</div>"
+    st.markdown(html, unsafe_allow_html=True)
+
+    # ----- 导出与分享 -----
+    st.subheader("📤 导出与分享")
+    exp_col1, exp_col2 = st.columns(2)
+    with exp_col1:
+        if st.button("⬇️ 导出CSV"):
+            csv = st.session_state.df.to_csv(index=False)
+            b64 = base64.b64encode(csv.encode()).decode()
+            st.markdown(f'<a href="data:file/csv;base64,{b64}" download="deadlines.csv">下载CSV</a>', unsafe_allow_html=True)
+        if st.button("⬇️ 导出日历(.ics)"):
+            if Calendar is None:
+                st.error("请安装 icalendar")
+            else:
+                try:
+                    cal = Calendar()
+                    cal.add('prodid', '-//DDL Pro//cn//')
+                    cal.add('version', '2.0')
+                    for _, row in st.session_state.df.iterrows():
+                        if row["状态"] == "已完成": continue
+                        event = Event()
+                        event.add('summary', row["课程/科目"])
+                        event.add('description', row["描述"])
+                        date_obj = datetime.strptime(row["截止日期"], "%Y-%m-%d").date()
+                        event.add('dtstart', date_obj)
+                        event.add('dtend', date_obj)
+                        cal.add_component(event)
+                    ics_data = cal.to_ical()
+                    b64 = base64.b64encode(ics_data).decode()
+                    st.markdown(f'<a href="data:text/calendar;base64,{b64}" download="deadlines.ics">下载.ics</a>', unsafe_allow_html=True)
+                except Exception as e:
+                    st.error(f"导出失败：{e}")
+    with exp_col2:
+        if st.button("🔄 生成分享卡片"):
+            df_share = st.session_state.df[st.session_state.df["状态"] != "已完成"].copy()
+            if df_share.empty:
+                st.warning("没有未完成任务")
+            else:
+                df_share = df_share.sort_values("截止日期")
+                lines = ["# 📋 我的DDL清单\n"]
+                for _, row in df_share.iterrows():
+                    lines.append(f"- **{row['课程/科目']}** 截止: {row['截止日期']} | {row['描述']}")
+                lines.append(f"\n> 生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+                md = "\n".join(lines)
+                st.text_area("复制以下内容", md, height=200)
+                st.download_button("下载.md", md, file_name="DDL清单.md")
+
+    # ----- AI复习规划 -----
+    st.subheader("🧠 AI 复习规划")
+    if st.button("📅 生成复习计划"):
+        df_future = st.session_state.df[st.session_state.df["状态"] != "已完成"].copy()
+        if df_future.empty or not api_key:
+            st.warning("请确保有未完成任务并配置API Key")
+        else:
+            with st.spinner("生成中..."):
+                try:
+                    tasks = df_future[["课程/科目", "截止日期", "描述"]].head(10).to_string()
+                    headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                    prompt = f"基于以下任务：\n{tasks}\n生成未来一周复习优先级清单（Markdown列表）"
+                    payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7}
+                    response = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=payload, timeout=30)
+                    if response.status_code == 200:
+                        plan = response.json()["choices"][0]["message"]["content"]
+                        st.markdown(plan)
+                    else:
+                        st.error("生成失败")
+                except Exception as e:
+                    st.error(f"出错：{e}")
+
+# ==================== TAB2: 资料库（含分类管理） ====================
 with tab_lib:
     st.subheader("📁 分类管理")
-    # 显示现有分类
-    col_cat1, col_cat2 = st.columns([3, 1])
+    col_cat1, col_cat2 = st.columns([3,1])
     with col_cat1:
         st.write("当前分类：", ", ".join(st.session_state.categories))
     with col_cat2:
-        new_cat = st.text_input("新建分类", key="new_cat_input")
-        if st.button("➕ 添加分类"):
+        new_cat = st.text_input("新建分类", key="new_cat")
+        if st.button("➕ 添加"):
             if new_cat.strip() and new_cat.strip() not in st.session_state.categories:
                 st.session_state.categories.append(new_cat.strip())
                 save_categories()
-                st.success(f"分类 '{new_cat.strip()}' 已添加")
+                st.success(f"已添加 '{new_cat.strip()}'")
                 st.rerun()
             else:
                 st.warning("分类已存在或为空")
-
-    # 删除分类（仅当分类下无文件）
     with st.expander("🗑️ 删除分类（仅当为空）"):
-        del_cat = st.selectbox("选择要删除的分类", st.session_state.categories, key="del_cat_select")
-        if st.button("确认删除分类"):
-            # 检查该分类下是否有文件
+        del_cat = st.selectbox("选择分类", st.session_state.categories, key="del_cat")
+        if st.button("确认删除"):
             if not st.session_state.library[st.session_state.library["分类"] == del_cat].empty:
-                st.error(f"分类 '{del_cat}' 下还有文件，请先移走或删除文件")
+                st.error(f"分类 '{del_cat}' 下还有文件")
             else:
                 st.session_state.categories.remove(del_cat)
                 save_categories()
-                st.success(f"分类 '{del_cat}' 已删除")
+                st.success("已删除")
                 st.rerun()
 
     st.divider()
-    st.subheader("📤 上传文件到资料库")
-    with st.form("upload_lib_form"):
-        uploaded_file = st.file_uploader("选择文件 (支持 PDF/Word/PPT/图片/TXT等)", type=None, key="lib_upload")
-        # 选择分类
+    st.subheader("📤 上传文件")
+    with st.form("upload_lib"):
+        uploaded_file = st.file_uploader("选择文件 (PDF/Word/PPT/图片/TXT)", type=None, key="lib_upload")
         cat_options = st.session_state.categories + ["新建分类..."]
-        selected_cat = st.selectbox("选择分类", cat_options, key="lib_cat_select")
+        selected_cat = st.selectbox("选择分类", cat_options, key="lib_cat")
         if selected_cat == "新建分类...":
-            new_cat_name = st.text_input("请输入新分类名称")
+            new_cat_name = st.text_input("新分类名称")
         else:
             new_cat_name = None
-        lib_notes = st.text_area("备注（可选）")
-        submitted_lib = st.form_submit_button("📥 保存到资料库")
-        if submitted_lib and uploaded_file is not None:
-            # 确定分类
+        notes = st.text_area("备注（可选）")
+        submitted = st.form_submit_button("📥 保存到资料库")
+        if submitted and uploaded_file is not None:
             if new_cat_name and new_cat_name.strip():
                 final_cat = new_cat_name.strip()
                 if final_cat not in st.session_state.categories:
@@ -390,30 +617,27 @@ with tab_lib:
                     save_categories()
             else:
                 final_cat = selected_cat
-            # 提取内容
             content = extract_text_from_file(uploaded_file)
-            if content is None:
-                st.error("文件内容提取失败，请检查文件格式")
-                st.stop()
-            # 生成摘要
-            summary = content[:200] + ("..." if len(content)>200 else "")
-            new_row = {
-                "文件名": uploaded_file.name,
-                "分类": final_cat,
-                "摘要": summary,
-                "上传时间": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "内容": content
-            }
-            st.session_state.library = pd.concat([st.session_state.library, pd.DataFrame([new_row])], ignore_index=True)
-            save_library()
-            st.success(f"文件 '{uploaded_file.name}' 已保存到分类 '{final_cat}'")
-            st.rerun()
+            if content is None or content == "":
+                st.error("内容提取失败")
+            else:
+                summary = content[:200] + ("..." if len(content)>200 else "")
+                new_row = {
+                    "文件名": uploaded_file.name,
+                    "分类": final_cat,
+                    "摘要": summary,
+                    "上传时间": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "内容": content
+                }
+                st.session_state.library = pd.concat([st.session_state.library, pd.DataFrame([new_row])], ignore_index=True)
+                save_library()
+                st.success(f"文件 '{uploaded_file.name}' 已保存到 '{final_cat}'")
+                st.rerun()
 
     st.divider()
     st.subheader("📂 资料浏览")
-    # 筛选
-    filter_cat = st.selectbox("按分类筛选", ["全部"] + st.session_state.categories, key="lib_filter_cat")
-    search_lib = st.text_input("搜索资料（文件名或内容）", key="lib_search")
+    filter_cat = st.selectbox("按分类筛选", ["全部"] + st.session_state.categories, key="lib_filter")
+    search_lib = st.text_input("搜索", key="lib_search")
     df_lib = st.session_state.library.copy()
     if filter_cat != "全部":
         df_lib = df_lib[df_lib["分类"] == filter_cat]
@@ -423,21 +647,19 @@ with tab_lib:
     if df_lib.empty:
         st.info("暂无资料")
     else:
-        # 按分类分组显示
         for cat in st.session_state.categories:
             cat_df = df_lib[df_lib["分类"] == cat]
-            if cat_df.empty:
-                continue
+            if cat_df.empty: continue
             st.markdown(f"### 📁 {cat}")
             for idx, row in cat_df.iterrows():
                 with st.container():
-                    col1, col2, col3 = st.columns([3, 1, 1])
+                    col1, col2, col3 = st.columns([3,1,1])
                     with col1:
                         st.markdown(f"**{row['文件名']}**")
                         st.caption(row['摘要'])
                     with col2:
-                        if st.button("📄 查看全文", key=f"view_{idx}"):
-                            st.text_area("完整内容", row['内容'], height=150)
+                        if st.button("📄 查看", key=f"view_{idx}"):
+                            st.text_area("全文", row['内容'], height=150)
                     with col3:
                         if st.button("🗑️ 删除", key=f"del_{idx}"):
                             st.session_state.library = st.session_state.library.drop(index=idx).reset_index(drop=True)
@@ -445,11 +667,9 @@ with tab_lib:
                             st.rerun()
             st.divider()
 
-    # 导出资料库
-    st.subheader("📤 导出资料库")
     if st.button("导出资料库CSV"):
         csv = st.session_state.library.to_csv(index=False)
         b64 = base64.b64encode(csv.encode()).decode()
         st.markdown(f'<a href="data:file/csv;base64,{b64}" download="library.csv">下载CSV</a>', unsafe_allow_html=True)
 
-st.caption("💡 支持多种文件格式，自动提取文本，按分类管理，保留原文件名")
+st.caption("💡 全部功能：DDL管理（AI解析/图表/月视图/分享/复习）+ 资料库（分类/上传/搜索）")
