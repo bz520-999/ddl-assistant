@@ -1,9 +1,9 @@
 streamlit
 pandas
 requests
-icalendar
-pypdf
 plotly
+pypdf
+icalendar
 python-dateutil
-opencv-python-headless
 easyocr
+opencv-python-headless
