@@ -7,3 +7,5 @@ icalendar
 python-dateutil
 easyocr
 opencv-python-headless
+python-docx
+python-pptx
