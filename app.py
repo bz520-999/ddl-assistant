@@ -70,6 +70,7 @@ def save_data():
 
 st.title("🚀 智能学习DDL管理 Pro")
 
+# 倒计时横幅（安全，已加容错）
 if not st.session_state.df.empty:
     try:
         df_urgent = st.session_state.df[st.session_state.df["状态"] != "已完成"].copy()
@@ -89,6 +90,7 @@ if not st.session_state.df.empty:
     except:
         pass
 
+# 今日/明日提醒（安全）
 if not st.session_state.df.empty:
     try:
         df_alert = st.session_state.df[st.session_state.df["状态"] != "已完成"].copy()
@@ -288,85 +290,60 @@ with tab2:
         df_display = df_display[df_display["状态"] == filter_status]
 
     if not df_display.empty:
-        df_display["截止日期_dt"] = pd.to_datetime(df_display["截止日期"], errors='coerce')
-        df_display = df_display.dropna(subset=["截止日期_dt"]).copy()
-        if not df_display.empty:
-            today = datetime.now().date()
-            df_display["剩余天数"] = (df_display["截止日期_dt"].dt.date - today).dt.days
+        st.caption("💡 点击下方【状态】列，可直接切换 未完成/已完成")
+        edited_df = st.data_editor(
+            df_display[["课程/科目", "截止日期", "描述", "标签", "状态"]],
+            column_config={
+                "状态": st.column_config.SelectboxColumn("状态", options=["未完成", "已完成"], required=True),
+            },
+            use_container_width=True,
+            hide_index=True,
+            key="edit_status_simple"
+        )
 
-            def get_icon(row):
-                if row["状态"] == "已完成":
-                    return "✅ 已完成"
-                days = row["剩余天数"]
-                if days < 0:
-                    return "🔴 逾期" + str(days)
-                elif days == 0:
-                    return "🔴 今天截止！"
-                elif days <= 3:
-                    return "🟠 剩" + str(days) + "天"
-                else:
-                    return "🟢 剩" + str(days) + "天"
+        if not edited_df.equals(df_display[["课程/科目", "截止日期", "描述", "标签", "状态"]]):
+            for idx, row in edited_df.iterrows():
+                mask = (st.session_state.df["课程/科目"] == row["课程/科目"]) & \
+                       (st.session_state.df["截止日期"] == row["截止日期"])
+                if mask.any():
+                    st.session_state.df.loc[mask, "状态"] = row["状态"]
+            save_data()
+            st.success("✅ 状态已更新！")
+            st.rerun()
 
-            df_display["状态标识"] = df_display.apply(get_icon, axis=1)
+        st.divider()
+        st.subheader("🗑️ 批量删除")
+        df_del = df_display.copy()
+        df_del["选择删除"] = False
+        edited_del = st.data_editor(
+            df_del[["选择删除", "课程/科目", "截止日期", "状态"]],
+            column_config={"选择删除": st.column_config.CheckboxColumn("勾选")},
+            hide_index=True,
+            key="del_editor_simple"
+        )
 
-            st.caption("💡 点击下方【状态】列，可直接切换 未完成/已完成")
-            edited_df = st.data_editor(
-                df_display[["课程/科目", "截止日期", "描述", "标签", "状态", "状态标识", "剩余天数"]],
-                column_config={
-                    "状态": st.column_config.SelectboxColumn("状态", options=["未完成", "已完成"], required=True),
-                    "剩余天数": st.column_config.NumberColumn("剩余天数", disabled=True),
-                    "状态标识": st.column_config.TextColumn("状态标识", disabled=True),
-                },
-                use_container_width=True,
-                hide_index=True,
-                key="edit_status"
-            )
-
-            if not edited_df.equals(df_display[["课程/科目", "截止日期", "描述", "标签", "状态", "状态标识", "剩余天数"]]):
-                for idx, row in edited_df.iterrows():
-                    mask = (st.session_state.df["课程/科目"] == row["课程/科目"]) & \
-                           (st.session_state.df["截止日期"] == row["截止日期"])
-                    if mask.any():
-                        st.session_state.df.loc[mask, "状态"] = row["状态"]
-                save_data()
-                st.success("✅ 状态已更新！")
-                st.rerun()
-
-            st.divider()
-            st.subheader("🗑️ 批量删除")
-            df_del = df_display.copy()
-            df_del["选择删除"] = False
-            edited_del = st.data_editor(
-                df_del[["选择删除", "课程/科目", "截止日期", "状态"]],
-                column_config={"选择删除": st.column_config.CheckboxColumn("勾选")},
-                hide_index=True,
-                key="del_editor"
-            )
-
-            col_del1, col_del2 = st.columns(2)
-            with col_del1:
-                if st.button("🗑️ 删除已勾选项", use_container_width=True):
-                    selected = edited_del[edited_del["选择删除"] == True]
-                    if not selected.empty:
-                        for _, row in selected.iterrows():
-                            mask = (st.session_state.df["课程/科目"] == row["课程/科目"]) & \
-                                   (st.session_state.df["截止日期"] == row["截止日期"])
-                            if mask.any():
-                                st.session_state.df = st.session_state.df.drop(st.session_state.df[mask].index)
-                        save_data()
-                        st.success(f"✅ 已删除 {len(selected)} 项")
-                        st.rerun()
-                    else:
-                        st.warning("请至少勾选一项")
-            with col_del2:
-                if st.button("🧹 一键清除已完成", use_container_width=True):
-                    before = len(st.session_state.df)
-                    st.session_state.df = st.session_state.df[st.session_state.df["状态"] != "已完成"]
+        col_del1, col_del2 = st.columns(2)
+        with col_del1:
+            if st.button("🗑️ 删除已勾选项", use_container_width=True):
+                selected = edited_del[edited_del["选择删除"] == True]
+                if not selected.empty:
+                    for _, row in selected.iterrows():
+                        mask = (st.session_state.df["课程/科目"] == row["课程/科目"]) & \
+                               (st.session_state.df["截止日期"] == row["截止日期"])
+                        if mask.any():
+                            st.session_state.df = st.session_state.df.drop(st.session_state.df[mask].index)
                     save_data()
-                    st.success(f"已清除 {before - len(st.session_state.df)} 项")
+                    st.success(f"✅ 已删除 {len(selected)} 项")
                     st.rerun()
-        else:
-            st.info("当前任务中没有有效日期，请检查数据格式")
+                else:
+                    st.warning("请至少勾选一项")
+        with col_del2:
+            if st.button("🧹 一键清除已完成", use_container_width=True):
+                before = len(st.session_state.df)
+                st.session_state.df = st.session_state.df[st.session_state.df["状态"] != "已完成"]
+                save_data()
+                st.success(f"已清除 {before - len(st.session_state.df)} 项")
+                st.rerun()
     else:
         st.info("没有匹配的任务")
 
@@ -625,4 +602,4 @@ with tab6:
         st.success("🎉 本月没有未完成的任务，继续保持！")
 
 st.divider()
-st.caption("Pro 终极版: AI解析 | 红绿灯预警 | 月视图 | 图片OCR | 数据备份 | 暗黑主题")
+st.caption("Pro 版本: AI解析 | 重复任务 | 月视图 | 图片OCR | 数据备份 | 暗黑主题")
