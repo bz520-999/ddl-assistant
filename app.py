@@ -1,9 +1,14 @@
 """
-学习助手 Pro - DDL 管理与学习资料库系统（v2 新增个性化复习方案）
+学习助手 Pro - DDL 管理与学习资料库系统（v2 - 含个性化学习画像）
 ========================================
-新增功能：
-  1. 首次进入引导用户配置每日学习时间段，生成个人学习画像
-  2. 基于学习画像 + 当前任务，一键生成可复制的私人复习方案 Prompt
+功能概述：
+  1. 首次进入引导用户配置每日学习时间段（预设+自定义），生成个人学习画像
+  2. 智能输入：支持自然语言/文件上传，AI 自动识别任务信息
+  3. DDL 管理：增删改查、状态追踪、重复任务、搜索筛选
+  4. 数据分析：任务分布柱状图、标签饼图、月度日历视图
+  5. AI 辅助：智能任务解析、复习优先级规划、私人定制 Prompt 一键生成
+  6. 资料库：文件上传、文本提取、分类管理、全文检索
+  7. 导出分享：CSV、ICS 日历、Markdown 分享卡片
 """
 import streamlit as st
 import pandas as pd
@@ -15,7 +20,7 @@ import base64
 import plotly.express as px
 
 # ============================================================
-# 一、依赖库加载（带容错）
+# 一、依赖库加载（带容错，缺失时功能降级而非崩溃）
 # ============================================================
 try:
     from pypdf import PdfReader
@@ -67,7 +72,6 @@ st.markdown("""
     .cal-cell .date { font-weight: bold; font-size: 13px; }
     .cal-weekday { text-align: center; font-weight: bold; color: #888;
                    font-size: 13px; padding: 4px 0; }
-    /* ===== 【新增】学习画像卡片样式 ===== */
     .profile-card {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         border-radius: 12px; padding: 1.2rem; color: white;
@@ -89,7 +93,7 @@ st.markdown("""
 DDL_FILE = "deadlines.csv"
 LIBRARY_FILE = "library.csv"
 CATEGORIES_FILE = "categories.csv"
-PROFILE_FILE = "study_profile.csv"  # ===== 【新增】学习画像文件 =====
+PROFILE_FILE = "study_profile.csv"
 
 # ============================================================
 # 四、数据初始化
@@ -123,13 +127,14 @@ if "categories" not in st.session_state:
     else:
         st.session_state.categories = ["未分类"]
 
-# ===== 【新增】学习画像初始化 =====
+# --- 学习画像 ---
 if "profile" not in st.session_state:
     if os.path.exists(PROFILE_FILE):
         saved = pd.read_csv(PROFILE_FILE)
         st.session_state.profile = {
             "name": saved.iloc[0].get("昵称", ""),
-            "time_slots": saved.iloc[0].get("学习时段", "").split("、"),
+            "time_slots": [s.strip() for s in str(saved.iloc[0].get("学习时段", "")).split("、") if s.strip()],
+            "custom_slots": [s.strip() for s in str(saved.iloc[0].get("自定义时段", "")).split("、") if s.strip()],
             "duration": saved.iloc[0].get("单次时长", "60分钟"),
             "style": saved.iloc[0].get("学习风格", ""),
             "weak_subjects": saved.iloc[0].get("薄弱科目", ""),
@@ -144,21 +149,26 @@ if "profile" not in st.session_state:
 # 五、保存函数
 # ============================================================
 def save_ddl():
+    """将 DDL 数据写入 CSV"""
     st.session_state.df.to_csv(DDL_FILE, index=False, encoding="utf-8-sig")
 
+
 def save_library():
+    """将资料库数据写入 CSV"""
     st.session_state.library.to_csv(LIBRARY_FILE, index=False, encoding="utf-8-sig")
 
+
 def save_categories():
+    """将分类列表写入 CSV"""
     pd.DataFrame({"分类": st.session_state.categories}).to_csv(CATEGORIES_FILE, index=False)
 
 
-# ===== 【新增】保存学习画像 =====
 def save_profile(profile_dict):
-    """将学习画像持久化到 CSV"""
+    """将学习画像持久化到 CSV，包含自定义时段"""
     df = pd.DataFrame([{
         "昵称": profile_dict.get("name", ""),
         "学习时段": "、".join(profile_dict.get("time_slots", [])),
+        "自定义时段": "、".join(profile_dict.get("custom_slots", [])),
         "单次时长": profile_dict.get("duration", "60分钟"),
         "学习风格": profile_dict.get("style", ""),
         "薄弱科目": profile_dict.get("weak_subjects", ""),
@@ -168,14 +178,18 @@ def save_profile(profile_dict):
     df.to_csv(PROFILE_FILE, index=False, encoding="utf-8-sig")
 
 
-# ===== 【新增】生成个性化复习 Prompt =====
+# ============================================================
+# 六、生成个性化复习 Prompt
+# ============================================================
 def generate_personalized_prompt(profile, tasks_df):
     """
     根据学习画像 + 当前未完成任务，生成一段结构化 Prompt。
     用户可以一键复制后粘贴到任意 AI 中获取定制化复习方案。
     """
     p = profile
-    slots_str = "、".join(p.get("time_slots", ["未设置"]))
+    # 合并预设时段 + 自定义时段
+    all_slots = p.get("time_slots", []) + p.get("custom_slots", [])
+    slots_str = "、".join(all_slots) if all_slots else "未设置"
 
     # 构建任务摘要
     if tasks_df.empty:
@@ -189,7 +203,7 @@ def generate_personalized_prompt(profile, tasks_df):
                 ddl = datetime.strptime(row["截止日期"], "%Y-%m-%d").date()
                 days_left = (ddl - today).days
                 urgency = "🔴 紧急" if days_left <= 2 else "🟡 较急" if days_left <= 5 else "🟢 从容"
-            except:
+            except Exception:
                 days_left = "?"
                 urgency = "⚪ 未知"
             lines.append(
@@ -226,9 +240,10 @@ def generate_personalized_prompt(profile, tasks_df):
 
 
 # ============================================================
-# 六、辅助工具函数
+# 七、辅助工具函数
 # ============================================================
 def parse_flexible_date(date_str):
+    """灵活日期解析：兼容多种日期格式"""
     if not date_str:
         return None
     date_str = date_str.strip().replace("。", "").replace("，", ",")
@@ -248,6 +263,7 @@ def parse_flexible_date(date_str):
 
 
 def extract_text_from_file(uploaded_file):
+    """从上传文件中提取文本，支持 PDF/Word/PPT/图片/TXT"""
     text = ""
     file_type = uploaded_file.type
     if file_type == "application/pdf":
@@ -275,7 +291,8 @@ def extract_text_from_file(uploaded_file):
             st.error("请安装 python-pptx")
     elif file_type.startswith("image/"):
         try:
-            import easyocr, tempfile
+            import easyocr
+            import tempfile
             reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
             with tempfile.NamedTemporaryFile(delete=False, suffix=".jpg") as tmp:
                 tmp.write(uploaded_file.read())
@@ -299,13 +316,13 @@ def extract_text_from_file(uploaded_file):
 
 
 # ============================================================
-# 七、标题
+# 八、标题
 # ============================================================
 st.title("🎓 学习助手 Pro")
 
 
 # ============================================================
-# ===== 【新增】八、首次进入 — 学习画像配置引导 =====
+# 九、首次进入 — 学习画像配置引导
 # ============================================================
 if not st.session_state.profile.get("setup_done", False):
     st.markdown("---")
@@ -319,7 +336,7 @@ if not st.session_state.profile.get("setup_done", False):
         # 昵称
         name = st.text_input("你的昵称", placeholder="例如：小明")
 
-        # 多选时间段
+        # 预设时间段多选
         st.markdown("**选择你每天可用于学习的时段**（可多选）：")
         slot_options = {
             "🌅 清晨 (6:00-8:00)": "清晨 6:00-8:00",
@@ -337,7 +354,18 @@ if not st.session_state.profile.get("setup_done", False):
                 if st.checkbox(label, key=f"slot_{i}"):
                     selected_slots.append(value)
 
+        # 自定义时间段
+        st.markdown("---")
+        st.markdown("**如果预设时段不满足需求，可以自定义：**")
+        custom_slot_input = st.text_input(
+            "自定义时间段",
+            placeholder="例如：午休 12:30-13:30、通勤 7:00-8:00",
+            help="多个时段用顿号「、」或逗号「，」分隔",
+            key="custom_slot_input"
+        )
+
         st.markdown("")
+
         # 单次学习时长
         duration = st.selectbox(
             "每次学习时长偏好",
@@ -360,19 +388,30 @@ if not st.session_state.profile.get("setup_done", False):
         weak = st.text_input("薄弱科目（可选）", placeholder="例如：高等数学、英语听力")
 
         # 补充说明
-        notes = st.text_area("补充说明（可选）", placeholder="例如：周末白天有兼职，只有晚上能学习",
+        notes = st.text_area("补充说明（可选）",
+                             placeholder="例如：周末白天有兼职，只有晚上能学习",
                              height=68)
 
         st.markdown("")
         submitted = st.form_submit_button("✅ 保存我的学习画像", use_container_width=True)
 
         if submitted:
-            if not selected_slots:
-                st.error("请至少选择一个学习时段")
+            # 解析自定义时间段
+            custom_slots = []
+            if custom_slot_input.strip():
+                raw = custom_slot_input.strip().replace("，", "、").replace(",", "、")
+                custom_slots = [s.strip() for s in raw.split("、") if s.strip()]
+
+            # 合并预设 + 自定义
+            all_slots = selected_slots + custom_slots
+
+            if not all_slots:
+                st.error("请至少选择一个预设时段，或填写一个自定义时间段")
             else:
                 st.session_state.profile = {
                     "name": name if name else "同学",
                     "time_slots": selected_slots,
+                    "custom_slots": custom_slots,
                     "duration": duration,
                     "style": style,
                     "weak_subjects": weak,
@@ -385,11 +424,12 @@ if not st.session_state.profile.get("setup_done", False):
 
 
 # ============================================================
-# ===== 【新增】九、学习画像展示卡片（配置完成后显示） =====
+# 十、学习画像展示卡片
 # ============================================================
 if st.session_state.profile.get("setup_done", False):
     p = st.session_state.profile
-    slots_html = "".join([f'<span class="tag">{s}</span>' for s in p.get("time_slots", [])])
+    all_display_slots = p.get("time_slots", []) + p.get("custom_slots", [])
+    slots_html = "".join([f'<span class="tag">{s}</span>' for s in all_display_slots if s])
     weak_text = p.get("weak_subjects", "") or "无"
     style_text = p.get("style", "未设置")
 
@@ -407,15 +447,16 @@ if st.session_state.profile.get("setup_done", False):
 
 
 # ============================================================
-# 十、侧边栏
+# 十一、侧边栏
 # ============================================================
 with st.sidebar:
     st.header("⚙️ 设置")
-    api_key = st.text_input("DeepSeek API Key", type="password", help="platform.deepseek.com 获取")
+    api_key = st.text_input("DeepSeek API Key", type="password",
+                            help="platform.deepseek.com 获取")
 
     st.divider()
 
-    # ===== 【新增】学习画像管理入口 =====
+    # 学习画像管理
     st.subheader("👤 学习画像")
     if st.session_state.profile.get("setup_done", False):
         if st.button("✏️ 修改学习画像"):
@@ -426,6 +467,7 @@ with st.sidebar:
 
     st.divider()
 
+    # 主题切换
     st.subheader("🎨 主题")
     if st.button("切换暗黑模式"):
         if "dark" not in st.session_state:
@@ -448,6 +490,7 @@ with st.sidebar:
 
     st.divider()
 
+    # 数据备份
     st.subheader("💾 数据备份")
     json_ddl = st.session_state.df.to_json(orient="records", force_ascii=False)
     st.download_button("📥 备份DDL", data=json_ddl, file_name="backup_ddl.json")
@@ -467,28 +510,30 @@ with st.sidebar:
 
 
 # ============================================================
-# 如果还没配置画像，只显示配置引导，不显示主功能
+# 如果还没配置画像，停在这里不显示主功能
 # ============================================================
 if not st.session_state.profile.get("setup_done", False):
     st.stop()
 
 
 # ============================================================
-# 十一、智能输入区
+# 十二、智能输入区
 # ============================================================
 st.markdown("### ✨ 智能输入")
 with st.container():
     input_col, btn_col = st.columns([5, 1])
     with input_col:
-        smart_input = st.text_area("输入DDL或上传文件", placeholder="例如：下周一交高数作业，或上传课件",
+        smart_input = st.text_area("输入DDL或上传文件",
+                                   placeholder="例如：下周一交高数作业，或上传课件",
                                    height=80, key="smart_input")
     with btn_col:
         st.write("")
         st.write("")
         send_btn = st.button("🚀 发送", use_container_width=True)
 
-    uploaded_file = st.file_uploader("或点击上传文件 (PDF/Word/PPT/图片/TXT)", type=None,
-                                     key="smart_file", label_visibility="collapsed")
+    uploaded_file = st.file_uploader("或点击上传文件 (PDF/Word/PPT/图片/TXT)",
+                                     type=None, key="smart_file",
+                                     label_visibility="collapsed")
 
     if send_btn:
         if uploaded_file is not None:
@@ -505,16 +550,20 @@ with st.container():
             else:
                 with st.spinner("AI解析中..."):
                     try:
-                        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                        headers = {"Authorization": f"Bearer {api_key}",
+                                   "Content-Type": "application/json"}
                         prompt = f"""提取学习任务信息。规则：
 1. 如果是DDL，提取课程名称、截止日期(转为YYYY-MM-DD)、描述。
 2. 如果不是DDL，请返回 {{"type": "other", "content": "原文"}}。
 只返回JSON。
 文本：{smart_input}"""
-                        payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}],
+                        payload = {"model": "deepseek-chat",
+                                   "messages": [{"role": "user", "content": prompt}],
                                    "temperature": 0.1}
-                        response = requests.post("https://api.deepseek.com/v1/chat/completions",
-                                                 headers=headers, json=payload, timeout=30)
+                        response = requests.post(
+                            "https://api.deepseek.com/v1/chat/completions",
+                            headers=headers, json=payload, timeout=30
+                        )
                         if response.status_code == 200:
                             content = response.json()["choices"][0]["message"]["content"]
                             content = content.replace("```json", "").replace("```", "").strip()
@@ -525,7 +574,7 @@ with st.container():
                                 st.session_state["parsed_notes"] = parsed.get("notes", "")
                                 st.success("✅ 识别为DDL，已自动填入下方表单")
                             else:
-                                st.info("识别为普通文本，已复制到剪贴板（可手动添加到资料库）")
+                                st.info("识别为普通文本")
                                 st.session_state["smart_text"] = parsed.get("content", smart_input)
                         else:
                             st.error("AI解析失败")
@@ -537,7 +586,7 @@ with st.container():
 st.divider()
 
 # ============================================================
-# 十二、主标签页
+# 十三、主标签页
 # ============================================================
 tab_ddl, tab_lib = st.tabs(["📝 DDL管理（全功能）", "📚 资料库"])
 
@@ -549,11 +598,13 @@ with tab_ddl:
     with st.form("ddl_form", clear_on_submit=True):
         col1, col2 = st.columns(2)
         with col1:
-            course = st.text_input("课程/科目", value=st.session_state.get("parsed_course", ""))
+            course = st.text_input("课程/科目",
+                                   value=st.session_state.get("parsed_course", ""))
             deadline_raw = st.text_input("截止日期 (支持多种格式)",
                                          value=st.session_state.get("parsed_deadline", ""))
         with col2:
-            notes = st.text_input("描述", value=st.session_state.get("parsed_notes", ""))
+            notes = st.text_input("描述",
+                                  value=st.session_state.get("parsed_notes", ""))
             tag = st.text_input("标签", placeholder="作业/考试")
             repeat = st.selectbox("重复", ["无", "每周", "每月"])
         submitted = st.form_submit_button("💾 保存DDL")
@@ -584,45 +635,57 @@ with tab_ddl:
                     st.stop()
                 for dt in dates:
                     new_rows.append({
-                        "课程/科目": course, "截止日期": dt.strftime("%Y-%m-%d"),
-                        "描述": notes, "标签": tag if tag else "未分类",
-                        "重复": repeat, "状态": "未完成",
+                        "课程/科目": course,
+                        "截止日期": dt.strftime("%Y-%m-%d"),
+                        "描述": notes,
+                        "标签": tag if tag else "未分类",
+                        "重复": repeat,
+                        "状态": "未完成",
                         "添加时间": datetime.now().strftime("%Y-%m-%d %H:%M")
                     })
-                st.session_state.df = pd.concat([st.session_state.df, pd.DataFrame(new_rows)],
-                                                ignore_index=True)
+                st.session_state.df = pd.concat(
+                    [st.session_state.df, pd.DataFrame(new_rows)], ignore_index=True
+                )
                 save_ddl()
                 for key in ["parsed_course", "parsed_deadline", "parsed_notes"]:
-                    if key in st.session_state: del st.session_state[key]
+                    if key in st.session_state:
+                        del st.session_state[key]
                 st.success(f"添加了 {len(new_rows)} 条DDL")
                 st.rerun()
 
     # ----- 管理与搜索 -----
     st.subheader("🔍 管理与搜索")
     search = st.text_input("搜索DDL", key="ddl_search")
-    filter_status = st.selectbox("状态筛选", ["全部", "未完成", "已完成"], key="ddl_status")
+    filter_status = st.selectbox("状态筛选", ["全部", "未完成", "已完成"],
+                                 key="ddl_status")
     df_display = st.session_state.df.copy()
     if search:
-        df_display = df_display[df_display["课程/科目"].str.contains(search, na=False) | df_display["描述"].str.contains(search, na=False)]
+        df_display = df_display[
+            df_display["课程/科目"].str.contains(search, na=False) |
+            df_display["描述"].str.contains(search, na=False)
+        ]
     if filter_status != "全部":
         df_display = df_display[df_display["状态"] == filter_status]
 
     if not df_display.empty:
         edited = st.data_editor(
             df_display[["课程/科目", "截止日期", "描述", "标签", "状态"]],
-            column_config={"状态": st.column_config.SelectboxColumn("状态", options=["未完成", "已完成"])},
+            column_config={
+                "状态": st.column_config.SelectboxColumn("状态", options=["未完成", "已完成"])
+            },
             hide_index=True, key="ddl_edit"
         )
         if not edited.equals(df_display[["课程/科目", "截止日期", "描述", "标签", "状态"]]):
             for _, row in edited.iterrows():
-                mask = (st.session_state.df["课程/科目"] == row["课程/科目"]) & (
-                            st.session_state.df["截止日期"] == row["截止日期"])
+                mask = ((st.session_state.df["课程/科目"] == row["课程/科目"]) &
+                        (st.session_state.df["截止日期"] == row["截止日期"]))
                 if mask.any():
                     st.session_state.df.loc[mask, "状态"] = row["状态"]
             save_ddl()
             st.success("状态已更新")
             st.rerun()
 
+        # 批量操作
         st.divider()
         st.subheader("🗑️ 批量操作")
         df_del = df_display.copy()
@@ -638,17 +701,21 @@ with tab_ddl:
                 selected = edited_del[edited_del["选择"] == True]
                 if not selected.empty:
                     for _, row in selected.iterrows():
-                        mask = (st.session_state.df["课程/科目"] == row["课程/科目"]) & (
-                                    st.session_state.df["截止日期"] == row["截止日期"])
+                        mask = ((st.session_state.df["课程/科目"] == row["课程/科目"]) &
+                                (st.session_state.df["截止日期"] == row["截止日期"]))
                         if mask.any():
-                            st.session_state.df = st.session_state.df.drop(st.session_state.df[mask].index)
+                            st.session_state.df = st.session_state.df.drop(
+                                st.session_state.df[mask].index
+                            )
                     save_ddl()
                     st.success(f"删除了 {len(selected)} 项")
                     st.rerun()
         with col_del2:
             if st.button("清除所有已完成"):
                 before = len(st.session_state.df)
-                st.session_state.df = st.session_state.df[st.session_state.df["状态"] != "已完成"]
+                st.session_state.df = st.session_state.df[
+                    st.session_state.df["状态"] != "已完成"
+                ]
                 save_ddl()
                 st.success(f"清除 {before - len(st.session_state.df)} 项")
                 st.rerun()
@@ -662,21 +729,29 @@ with tab_ddl:
         st.info("没有未完成的任务")
     else:
         try:
-            df_chart["截止日期"] = pd.to_datetime(df_chart["截止日期"], errors='coerce')
+            df_chart["截止日期"] = pd.to_datetime(df_chart["截止日期"], errors="coerce")
             df_chart = df_chart.dropna(subset=["截止日期"])
             today = datetime.now()
             future_30 = today + timedelta(days=30)
-            df_chart = df_chart[(df_chart["截止日期"] >= today) & (df_chart["截止日期"] <= future_30)]
+            df_chart = df_chart[
+                (df_chart["截止日期"] >= today) & (df_chart["截止日期"] <= future_30)
+            ]
             if not df_chart.empty:
-                day_order = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
+                day_order = ["Monday", "Tuesday", "Wednesday", "Thursday",
+                             "Friday", "Saturday", "Sunday"]
                 day_names_cn = ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-                df_chart["星期"] = pd.Categorical(df_chart["截止日期"].dt.day_name(), categories=day_order)
+                df_chart["星期"] = pd.Categorical(
+                    df_chart["截止日期"].dt.day_name(), categories=day_order
+                )
                 count_df = df_chart.groupby("星期").size().reset_index(name="任务数量")
                 count_df["星期"] = count_df["星期"].map(dict(zip(day_order, day_names_cn)))
-                fig = px.bar(count_df, x="星期", y="任务数量", title="未来30天 DDL 分布",
-                             color="任务数量", color_continuous_scale="Reds", text="任务数量")
+                fig = px.bar(count_df, x="星期", y="任务数量",
+                             title="未来30天 DDL 分布",
+                             color="任务数量", color_continuous_scale="Reds",
+                             text="任务数量")
                 fig.update_layout(height=350)
                 st.plotly_chart(fig, use_container_width=True)
+
                 st.subheader("🏷️ 标签分布")
                 tag_df = df_chart["标签"].value_counts().reset_index()
                 tag_df.columns = ["标签", "数量"]
@@ -723,7 +798,7 @@ with tab_ddl:
     df_cal = st.session_state.df[st.session_state.df["状态"] != "已完成"].copy()
     tasks = {}
     if not df_cal.empty:
-        df_cal["截止日期"] = pd.to_datetime(df_cal["截止日期"], errors='coerce')
+        df_cal["截止日期"] = pd.to_datetime(df_cal["截止日期"], errors="coerce")
         df_cal = df_cal.dropna(subset=["截止日期"])
         for _, row in df_cal.iterrows():
             if row["截止日期"].year == year and row["截止日期"].month == month:
@@ -761,8 +836,10 @@ with tab_ddl:
         if st.button("⬇️ 导出CSV"):
             csv = st.session_state.df.to_csv(index=False)
             b64 = base64.b64encode(csv.encode()).decode()
-            st.markdown(f'<a href="data:file/csv;base64,{b64}" download="deadlines.csv">下载CSV</a>',
-                        unsafe_allow_html=True)
+            st.markdown(
+                f'<a href="data:file/csv;base64,{b64}" download="deadlines.csv">下载CSV</a>',
+                unsafe_allow_html=True
+            )
         if st.button("⬇️ 导出日历(.ics)"):
             if Calendar is None:
                 st.error("请安装 icalendar")
@@ -772,7 +849,8 @@ with tab_ddl:
                     cal.add('prodid', '-//DDL Pro//cn//')
                     cal.add('version', '2.0')
                     for _, row in st.session_state.df.iterrows():
-                        if row["状态"] == "已完成": continue
+                        if row["状态"] == "已完成":
+                            continue
                         event = Event()
                         event.add('summary', row["课程/科目"])
                         event.add('description', row["描述"])
@@ -784,7 +862,8 @@ with tab_ddl:
                     b64 = base64.b64encode(ics_data).decode()
                     st.markdown(
                         f'<a href="data:text/calendar;base64,{b64}" download="deadlines.ics">下载.ics</a>',
-                        unsafe_allow_html=True)
+                        unsafe_allow_html=True
+                    )
                 except Exception as e:
                     st.error(f"导出失败：{e}")
     with exp_col2:
@@ -802,18 +881,13 @@ with tab_ddl:
                 st.text_area("复制以下内容", md, height=200)
                 st.download_button("下载.md", md, file_name="DDL清单.md")
 
-    # ============================================================
-    # ===== 【新增】AI 复习规划（原功能 + 私人定制 Prompt） =====
-    # ============================================================
+    # ----- AI 复习规划（原功能 + 私人定制 Prompt） -----
     st.subheader("🧠 AI 复习规划")
-
-    # 获取未完成任务（两个功能共用）
     df_future = st.session_state.df[st.session_state.df["状态"] != "已完成"].copy()
 
-    # --- 按钮行：左=直接生成 | 右=生成私人定制 Prompt ---
     plan_col1, plan_col2 = st.columns(2)
 
-    # 按钮 1：原有功能 —— 直接调用 API 生成复习计划
+    # 按钮 1：直接调用 API 生成复习计划
     with plan_col1:
         if st.button("📅 生成复习计划"):
             if df_future.empty or not api_key:
@@ -822,12 +896,16 @@ with tab_ddl:
                 with st.spinner("生成中..."):
                     try:
                         tasks_text = df_future[["课程/科目", "截止日期", "描述"]].head(10).to_string()
-                        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+                        headers = {"Authorization": f"Bearer {api_key}",
+                                   "Content-Type": "application/json"}
                         prompt = f"基于以下任务：\n{tasks_text}\n生成未来一周复习优先级清单（Markdown列表）"
-                        payload = {"model": "deepseek-chat", "messages": [{"role": "user", "content": prompt}],
+                        payload = {"model": "deepseek-chat",
+                                   "messages": [{"role": "user", "content": prompt}],
                                    "temperature": 0.7}
-                        response = requests.post("https://api.deepseek.com/v1/chat/completions",
-                                                 headers=headers, json=payload, timeout=30)
+                        response = requests.post(
+                            "https://api.deepseek.com/v1/chat/completions",
+                            headers=headers, json=payload, timeout=30
+                        )
                         if response.status_code == 200:
                             plan = response.json()["choices"][0]["message"]["content"]
                             st.markdown(plan)
@@ -836,35 +914,33 @@ with tab_ddl:
                     except Exception as e:
                         st.error(f"出错：{e}")
 
-    # ===== 【新增】按钮 2：一键生成私人定制 Prompt =====
+    # 按钮 2：一键生成私人定制 Prompt
     with plan_col2:
         if st.button("🎯 生成私人定制方案 Prompt"):
             if df_future.empty:
                 st.warning("没有未完成任务，请先添加 DDL")
             else:
-                # 调用函数生成个性化 Prompt
-                personal_prompt = generate_personalized_prompt(st.session_state.profile, df_future)
+                personal_prompt = generate_personalized_prompt(
+                    st.session_state.profile, df_future
+                )
                 st.session_state["personal_prompt"] = personal_prompt
 
-    # ===== 【新增】展示私人定制 Prompt（可一键复制） =====
+    # 展示私人定制 Prompt（可一键复制 + 下载）
     if "personal_prompt" in st.session_state:
         st.markdown("---")
         st.markdown("#### 🎯 你的私人定制复习方案 Prompt")
-        st.markdown("以下 Prompt 已结合你的**学习画像**（时间段、时长、风格、薄弱科目）和**当前任务清单**，"
-                    "复制后粘贴到任意 AI（ChatGPT / DeepSeek / Kimi 等）即可获得专属复习方案。")
-
-        # 使用 st.code 提供代码块样式（右上角自带复制按钮）
+        st.markdown(
+            "以下 Prompt 已结合你的**学习画像**（时间段、时长、风格、薄弱科目）"
+            "和**当前任务清单**，复制后粘贴到任意 AI（ChatGPT / DeepSeek / Kimi 等）"
+            "即可获得专属复习方案。"
+        )
         st.code(st.session_state["personal_prompt"], language=None)
-
-        # 额外提供下载按钮（备用方案）
         st.download_button(
             label="📥 下载 Prompt (.txt)",
             data=st.session_state["personal_prompt"],
             file_name="私人复习方案Prompt.txt",
             mime="text/plain"
         )
-
-        # 一键清空
         if st.button("🗑️ 清除 Prompt"):
             del st.session_state["personal_prompt"]
             st.rerun()
@@ -872,6 +948,8 @@ with tab_ddl:
 
 # ==================== TAB 2: 资料库 ====================
 with tab_lib:
+
+    # ----- 分类管理 -----
     st.subheader("📁 分类管理")
     col_cat1, col_cat2 = st.columns([3, 1])
     with col_cat1:
@@ -889,7 +967,9 @@ with tab_lib:
     with st.expander("🗑️ 删除分类（仅当为空）"):
         del_cat = st.selectbox("选择分类", st.session_state.categories, key="del_cat")
         if st.button("确认删除"):
-            if not st.session_state.library[st.session_state.library["分类"] == del_cat].empty:
+            if not st.session_state.library[
+                st.session_state.library["分类"] == del_cat
+            ].empty:
                 st.error(f"分类 '{del_cat}' 下还有文件")
             else:
                 st.session_state.categories.remove(del_cat)
@@ -898,9 +978,12 @@ with tab_lib:
                 st.rerun()
 
     st.divider()
+
+    # ----- 文件上传 -----
     st.subheader("📤 上传文件")
     with st.form("upload_lib"):
-        uploaded_file = st.file_uploader("选择文件 (PDF/Word/PPT/图片/TXT)", type=None, key="lib_upload")
+        uploaded_file = st.file_uploader("选择文件 (PDF/Word/PPT/图片/TXT)",
+                                         type=None, key="lib_upload")
         cat_options = st.session_state.categories + ["新建分类..."]
         selected_cat = st.selectbox("选择分类", cat_options, key="lib_cat")
         if selected_cat == "新建分类...":
@@ -922,30 +1005,45 @@ with tab_lib:
                 st.error("内容提取失败")
             else:
                 summary = content[:200] + ("..." if len(content) > 200 else "")
-                new_row = {"文件名": uploaded_file.name, "分类": final_cat, "摘要": summary,
-                           "上传时间": datetime.now().strftime("%Y-%m-%d %H:%M"), "内容": content}
-                st.session_state.library = pd.concat([st.session_state.library, pd.DataFrame([new_row])],
-                                                     ignore_index=True)
+                new_row = {
+                    "文件名": uploaded_file.name,
+                    "分类": final_cat,
+                    "摘要": summary,
+                    "上传时间": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "内容": content
+                }
+                st.session_state.library = pd.concat(
+                    [st.session_state.library, pd.DataFrame([new_row])],
+                    ignore_index=True
+                )
                 save_library()
                 st.success(f"文件 '{uploaded_file.name}' 已保存到 '{final_cat}'")
                 st.rerun()
 
     st.divider()
+
+    # ----- 资料浏览 -----
     st.subheader("📂 资料浏览")
-    filter_cat = st.selectbox("按分类筛选", ["全部"] + st.session_state.categories, key="lib_filter")
+    filter_cat = st.selectbox("按分类筛选",
+                              ["全部"] + st.session_state.categories, key="lib_filter")
     search_lib = st.text_input("搜索", key="lib_search")
     df_lib = st.session_state.library.copy()
     if filter_cat != "全部":
         df_lib = df_lib[df_lib["分类"] == filter_cat]
     if search_lib:
-        df_lib = df_lib[df_lib["文件名"].str.contains(search_lib, na=False) | df_lib["摘要"].str.contains(search_lib, na=False) | df_lib["内容"].str.contains(search_lib, na=False)]
+        df_lib = df_lib[
+            df_lib["文件名"].str.contains(search_lib, na=False) |
+            df_lib["摘要"].str.contains(search_lib, na=False) |
+            df_lib["内容"].str.contains(search_lib, na=False)
+        ]
 
     if df_lib.empty:
         st.info("暂无资料")
     else:
         for cat in st.session_state.categories:
             cat_df = df_lib[df_lib["分类"] == cat]
-            if cat_df.empty: continue
+            if cat_df.empty:
+                continue
             st.markdown(f"### 📁 {cat}")
             for idx, row in cat_df.iterrows():
                 with st.container():
@@ -958,8 +1056,9 @@ with tab_lib:
                             st.text_area("全文", row['内容'], height=150)
                     with col3:
                         if st.button("🗑️ 删除", key=f"del_{idx}"):
-                            st.session_state.library = st.session_state.library.drop(index=idx).reset_index(
-                                drop=True)
+                            st.session_state.library = st.session_state.library.drop(
+                                index=idx
+                            ).reset_index(drop=True)
                             save_library()
                             st.rerun()
             st.divider()
@@ -967,7 +1066,9 @@ with tab_lib:
     if st.button("导出资料库CSV"):
         csv = st.session_state.library.to_csv(index=False)
         b64 = base64.b64encode(csv.encode()).decode()
-        st.markdown(f'<a href="data:file/csv;base64,{b64}" download="library.csv">下载CSV</a>',
-                    unsafe_allow_html=True)
+        st.markdown(
+            f'<a href="data:file/csv;base64,{b64}" download="library.csv">下载CSV</a>',
+            unsafe_allow_html=True
+        )
 
 st.caption("💡 全部功能：DDL管理（AI解析/图表/月视图/分享/复习）+ 资料库（分类/上传/搜索）+ 个性化学习画像")
